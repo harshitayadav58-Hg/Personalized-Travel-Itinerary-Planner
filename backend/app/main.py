@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import date
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +42,14 @@ def seed_demo_data() -> None:
             interests=["History & Culture", "Food", "Shopping"],
             notes="First-time visitor, prefers walking where possible.",
         )
-        plan, engine = generate_full_plan(prefs)
+        # On serverless (Vercel) a Gemini call inside a cold start would risk
+        # the request timeout, so SEED_WITH_AI=0 seeds with the demo engine.
+        if os.getenv("SEED_WITH_AI", "1") == "0":
+            from .services.mock_generator import generate_demo_plan
+
+            plan, engine = generate_demo_plan(prefs), "demo"
+        else:
+            plan, engine = generate_full_plan(prefs)
         db.add(
             models.Trip(
                 user_id=user.id,
@@ -60,6 +68,9 @@ def seed_demo_data() -> None:
             )
         )
         db.commit()
+    except Exception as seed_error:  # noqa: BLE001 - seeding must never break startup
+        db.rollback()
+        print(f"[seed] skipped: {seed_error}")
     finally:
         db.close()
 
